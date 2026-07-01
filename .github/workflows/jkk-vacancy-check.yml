@@ -1,0 +1,39 @@
+name: JKK Vacancy Check
+
+on:
+  schedule:
+    # Runs every 5 minutes. GitHub Actions does not support intervals
+    # shorter than 5 minutes, and actual run times can drift a few
+    # minutes during periods of high load on GitHub's infrastructure.
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}   # lets you manually trigger a run from the Actions tab, for testing
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium
+
+      - name: Install dependencies
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Run vacancy check
+        env:
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_APP_PASSWORD: ${{ secrets.SENDER_APP_PASSWORD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+        run: python jkk_watcher_action.py
