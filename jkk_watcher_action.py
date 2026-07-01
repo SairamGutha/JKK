@@ -63,51 +63,63 @@ def send_email(subject, body):
         log(f"Email alert failed: {e}")
 
 
-def find_area_frame(page):
+def find_area_in_context(context, ward_code):
     """
-    The map (and submitPage) may live inside a sub-frame rather than the
-    top-level page. Search all frames for the <area> element with our
-    ward code and return (frame, selector) once found.
+    The real map content opens in a NEW popup window (via window.open),
+    not in the original page, and may also use frames within that window.
+    So we search every open page, and every frame within each page.
     """
-    selector = f"area[onclick*=\"submitPage('{WARD_CODE}')\"]"
-    for frame in page.frames:
-        try:
-            if frame.query_selector(selector):
-                return frame, selector
-        except Exception:
-            continue
+    selector = f"area[onclick*=\"submitPage('{ward_code}')\"]"
+    for pg in context.pages:
+        for frame in pg.frames:
+            try:
+                if frame.query_selector(selector):
+                    return frame, selector
+            except Exception:
+                continue
     return None, selector
 
 
-def check_once(page) -> bool:
+def collect_text_from_context(context):
+    text = ""
+    for pg in context.pages:
+        for frame in pg.frames:
+            try:
+                text += frame.inner_text("body") + "\n"
+            except Exception:
+                continue
+    return text
+
+
+def check_once(browser) -> bool:
+    context = browser.new_context()
+    page = context.new_page()
+
     page.goto(BASE_URL, wait_until="load")
-    page.wait_for_load_state("networkidle")
+    # Give the popup window time to open and finish its own redirects
+    # (the launcher page routes through an intermediate wait.jsp page).
+    page.wait_for_timeout(3000)
 
-    log(f"Frames on page: {[f.url for f in page.frames]}")
+    log(f"Pages open: {[p.url for p in context.pages]}")
 
-    frame, selector = find_area_frame(page)
+    frame, selector = find_area_in_context(context, WARD_CODE)
     if frame is None:
-        # Dump some HTML to help diagnose next time this happens.
-        log("Could not find the map area element in any frame. "
-            "Dumping first 500 chars of main page HTML for debugging:")
-        log(page.content()[:500])
+        log("Could not find the map area element in any open page/frame. "
+            "Dumping first 500 chars of each open page for debugging:")
+        for pg in context.pages:
+            log(f"--- {pg.url} ---")
+            log(pg.content()[:500])
         raise RuntimeError(f"Area element not found for ward code {WARD_CODE}")
 
     frame.click(selector)
-    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(3000)  # allow navigation/results to load
 
-    # Results might render in the same frame or a different one - check all.
-    combined_text = ""
-    for f in page.frames:
-        try:
-            combined_text += f.inner_text("body") + "\n"
-        except Exception:
-            continue
-
+    combined_text = collect_text_from_context(context)
     snippet = combined_text.strip().replace("\n", " ")[:200]
     log(f"Page text snippet: {snippet}")
 
     no_vacancy = any(marker in combined_text for marker in NO_VACANCY_MARKERS)
+    context.close()
     return not no_vacancy
 
 
