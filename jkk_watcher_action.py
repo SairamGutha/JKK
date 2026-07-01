@@ -63,16 +63,51 @@ def send_email(subject, body):
         log(f"Email alert failed: {e}")
 
 
+def find_area_frame(page):
+    """
+    The map (and submitPage) may live inside a sub-frame rather than the
+    top-level page. Search all frames for the <area> element with our
+    ward code and return (frame, selector) once found.
+    """
+    selector = f"area[onclick*=\"submitPage('{WARD_CODE}')\"]"
+    for frame in page.frames:
+        try:
+            if frame.query_selector(selector):
+                return frame, selector
+        except Exception:
+            continue
+    return None, selector
+
+
 def check_once(page) -> bool:
     page.goto(BASE_URL, wait_until="load")
-    page.evaluate(f"submitPage('{WARD_CODE}')")
-    page.wait_for_load_state("load")
+    page.wait_for_load_state("networkidle")
 
-    text = page.inner_text("body")
-    snippet = text.strip().replace("\n", " ")[:200]
+    log(f"Frames on page: {[f.url for f in page.frames]}")
+
+    frame, selector = find_area_frame(page)
+    if frame is None:
+        # Dump some HTML to help diagnose next time this happens.
+        log("Could not find the map area element in any frame. "
+            "Dumping first 500 chars of main page HTML for debugging:")
+        log(page.content()[:500])
+        raise RuntimeError(f"Area element not found for ward code {WARD_CODE}")
+
+    frame.click(selector)
+    page.wait_for_load_state("networkidle")
+
+    # Results might render in the same frame or a different one - check all.
+    combined_text = ""
+    for f in page.frames:
+        try:
+            combined_text += f.inner_text("body") + "\n"
+        except Exception:
+            continue
+
+    snippet = combined_text.strip().replace("\n", " ")[:200]
     log(f"Page text snippet: {snippet}")
 
-    no_vacancy = any(marker in text for marker in NO_VACANCY_MARKERS)
+    no_vacancy = any(marker in combined_text for marker in NO_VACANCY_MARKERS)
     return not no_vacancy
 
 
