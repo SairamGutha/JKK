@@ -128,9 +128,8 @@ def main():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
         try:
-            vacancy_found = check_once(page)
+            vacancy_found = check_once(browser)
         except Exception as e:
             log(f"Check failed: {e}")
             sys.exit(1)
