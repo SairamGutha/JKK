@@ -111,7 +111,12 @@ def check_once(browser) -> bool:
             log(pg.content()[:500])
         raise RuntimeError(f"Area element not found for ward code {WARD_CODE}")
 
-    frame.click(selector)
+    # <area> elements in image maps often fail Playwright's "visible"
+    # actionability check even though they're genuinely clickable in a
+    # real browser (their clickable region comes from the polygon coords,
+    # not normal CSS box visibility). Trigger the click via JS instead of
+    # a simulated mouse click to sidestep that check entirely.
+    frame.eval_on_selector(selector, "el => el.click()")
     page.wait_for_timeout(3000)  # allow navigation/results to load
 
     combined_text = collect_text_from_context(context)
