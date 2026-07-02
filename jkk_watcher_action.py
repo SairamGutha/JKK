@@ -13,6 +13,7 @@ to the repo.
 
 import os
 import sys
+import time
 import smtplib
 from datetime import datetime
 from email.mime.text import MIMEText
@@ -91,33 +92,47 @@ def collect_text_from_context(context):
     return text
 
 
+def wait_for_area_in_context(context, ward_code, timeout_seconds=25, poll_interval=1.0):
+    """
+    Polls repeatedly for the map area element to appear anywhere in any
+    open page/frame, since the popup window goes through an intermediate
+    loading page (wait.jsp) before the real map content is ready - a
+    fixed sleep isn't reliable because that load time varies.
+    """
+    elapsed = 0.0
+    while elapsed < timeout_seconds:
+        frame, selector = find_area_in_context(context, ward_code)
+        if frame is not None:
+            return frame, selector
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+    return None, f"area[onclick*=\"submitPage('{ward_code}')\"]"
+
+
 def check_once(browser) -> bool:
     context = browser.new_context()
     page = context.new_page()
 
     page.goto(BASE_URL, wait_until="load")
-    # Give the popup window time to open and finish its own redirects
-    # (the launcher page routes through an intermediate wait.jsp page).
-    page.wait_for_timeout(3000)
+
+    frame, selector = wait_for_area_in_context(context, WARD_CODE)
 
     log(f"Pages open: {[p.url for p in context.pages]}")
 
-    frame, selector = find_area_in_context(context, WARD_CODE)
     if frame is None:
-        log("Could not find the map area element in any open page/frame. "
-            "Dumping first 500 chars of each open page for debugging:")
+        log("Could not find the map area element in any open page/frame after "
+            "waiting. Dumping first 500 chars of each open page for debugging:")
         for pg in context.pages:
             log(f"--- {pg.url} ---")
             log(pg.content()[:500])
         raise RuntimeError(f"Area element not found for ward code {WARD_CODE}")
 
-    # <area> elements in image maps often fail Playwright's "visible"
-    # actionability check even though they're genuinely clickable in a
-    # real browser (their clickable region comes from the polygon coords,
-    # not normal CSS box visibility). Trigger the click via JS instead of
-    # a simulated mouse click to sidestep that check entirely.
     frame.eval_on_selector(selector, "el => el.click()")
-    page.wait_for_timeout(3000)  # allow navigation/results to load
+    try:
+        page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass  # if it never fully idles, we still try reading what's there
+    time.sleep(2)  # small buffer for any final rendering
 
     combined_text = collect_text_from_context(context)
     snippet = combined_text.strip().replace("\n", " ")[:200]
