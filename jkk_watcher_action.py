@@ -49,17 +49,25 @@ def send_email(subject, body):
     if not SENDER_EMAIL or not RECIPIENT_EMAIL:
         log("Email not configured (missing secrets) - skipping alert email.")
         return
+
+    # Support multiple recipients as a comma-separated list in the same secret,
+    # e.g. RECIPIENT_EMAIL = "you@gmail.com, spouse@gmail.com, backup@yahoo.com"
+    recipients = [addr.strip() for addr in RECIPIENT_EMAIL.split(",") if addr.strip()]
+    if not recipients:
+        log("No valid recipient addresses found - skipping alert email.")
+        return
+
     try:
         msg = MIMEText(body)
         msg["Subject"] = subject
         msg["From"] = SENDER_EMAIL
-        msg["To"] = RECIPIENT_EMAIL
+        msg["To"] = ", ".join(recipients)
 
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
             server.starttls()
             server.login(SENDER_EMAIL, SENDER_APP_PASSWORD)
-            server.sendmail(SENDER_EMAIL, [RECIPIENT_EMAIL], msg.as_string())
-        log("Email alert sent.")
+            server.sendmail(SENDER_EMAIL, recipients, msg.as_string())
+        log(f"Email alert sent to: {', '.join(recipients)}")
     except Exception as e:
         log(f"Email alert failed: {e}")
 
